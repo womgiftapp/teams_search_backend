@@ -1,136 +1,77 @@
 const express = require('express');
 const router = express.Router();
 //const geolib = require('geolib');
-// const { MongoClient, ObjectID } = require('mongodb');
+const mongoUtil = require('.././config/mongoUtil');
 
-var mongoUtil = require('.././config/mongoUtil');
+const conection = mongoUtil.connectServer();
 
-var conection = mongoUtil.connectServer();
-
-
+// Get Teams in Radius route using mongo queries
 router.get('/geonear', (req, res) => {
-    if (typeof req.query.radius === "undefined"
-        && typeof req.query.lat === "undefined"
-        && typeof req.query.lng === "undefined") {
-        console.log('Unknown location and radius for search nearby teams');
+
+    if (!req.query.radius || !req.query.lat || !req.query.lng ) {
+        res.send(400,'Unknown location and radius for search nearby teams');
+        return;
+    }
+    if ( !req.query.skip || !req.query.take ){ //||  !Number(req.query.skip)||  !Number(req.query.take)) {        
+        res.send(400,'Unknown skip and take parameters for search nearby teams pagination');
         return;
     }
 
-    // db.getCollection('Teams').aggregate([
-    //     { 
-    //           "$geoNear": {
-    //               "near": {
-    //                    "type": "Point",
-    //                    "coordinates": [24.56, 27.45]
-    //                },
-    //                "distanceField": "distance",
-    //                "maxDistance": 200,
-    //                "spherical": true,
-    //                "query": { "loc.type": "Point" }
-    //            }
-    //       }
-    //   ])
-
     conection.then(function (client) {
         console.log('Connected to MongoDB server');
-        const db = client.db('joinme');
+        const db = client.db('joinme');    
 
-        // db.collection('Teams').find({}).toArray().then((teams) => {
-        //     res.json(teams);
-        //    console.log(JSON.stringify(teams, undefined, 2));
-        // });
-        
-        db.collection('Teams').aggregate([
-            {
-                $geoNear: {
-                    "near": {
-                        "type": "Point",
-                        "coordinates": [23.56, 27.45]
-                        //coordinates: [parseFloat(req.query.lng), parseFloat(req.query.lat)]
-                    },
-              //      key: 'location',
-                    "distanceField": "distance",
-              //distanceField: "dist.calculated",
-                    "maxDistance": 2000,
-                    "spherical": true,
-                  //  "query": { "loc.type": "Point" }
+        db.collection('teams').createIndex({ "location": '2dsphere' }).then(() => {
+            // Lng and lat for haifa current location "coordinates":[32.822190, 34.994930]     
+
+            db.collection('teams').aggregate([
+                {
+                    $geoNear: {
+                        spherical: true,
+                        near: {
+                            "type": "Point",
+                            "coordinates": [parseFloat(req.query.lng), parseFloat(req.query.lat)]
+                        },
+                        distanceField: "distance",
+                        maxDistance: parseFloat(req.query.radius)
+                    }
+
+                }, {
+                    $skip: Math.abs(Number(req.query.skip))
+                },{
+                    $limit: Math.abs(Number(req.query.take))
                 }
-            }
-            // ,
-            // {
-            //     "$sort": { "distance": -1 } // Sort the nearest first
-            // }
+            ])
+                .toArray().then((teams) => {
+                    //console.log(JSON.stringify(teams, undefined, 2));
+                    res.json(teams);
+                }).catch((err) => {
+                    console.log('Unable to find nearby teams', err);
+                });
+        }).catch((err) => {
+            console.log('DB create index error', err);
+        });;
 
-            //db.getCollection('Teams').aggregate([{$sort:{"_id":-1}}])
-            // {
-            //         $sort: { "_id": -1 } // Sort the nearest first
-            //     }
-        ]
-        // ,
-        //     function (err, docs) {
-        //         //if(err) console.log("Error"+err);
-        //         console.log("docs: "+docs);
-        //        // res.json(docs);
-        //     }
-        ).toArray().then((docs)=>{
-            console.log(JSON.stringify(docs, undefined, 2));
-        });
-        
         client.close;
     }).catch((err) => {
-        console.log('Unable to connect to MongoDB server');
+        console.log('Unable to connect to MongoDB server', err);
     });
 
 });
 
-// Get Teams in Radius route
+// Get Teams in Radius route using nodejs functions
 router.get('/', (req, res) => {
 
     conection.then(function (client) {
         console.log('Connected to MongoDB server');
-        //    
-        if (typeof req.query.radius !== "undefined"
-            && typeof req.query.lat !== "undefined"
-            && typeof req.query.lng !== "undefined") {
-
-            client.db().collection('Teams').find({
-                location: { $geoWithin: { $centerSphere: [[32, 21.1], 10 / 3963.2] } }
-            }
-            ).toArray().then((teams) => {
-                console.log(JSON.stringify(teams, undefined, 2));
-                // let teamsInRadius=[];
-                // teams.forEach(team => {
-                //     var { name, location: { lat, lng } } = team;
-                //     console.log(`name: ${name}, lat: ${lat}, lng: ${lng}`);
-                //     if (typeof req.query.radius !== "undefined"
-                //         && typeof req.query.lat !== "undefined"
-                //         && typeof req.query.lng !== "undefined") {
-                //         //                    
-                //         const inRadius = geolib.isPointInCircle(
-                //             { latitude: lat, longitude: lng },
-                //             { latitude: req.query.lat, longitude: req.query.lng },
-                //             req.query.radius * 1000);
-                //         //
-                //         const distance = geolib.getDistance(
-                //             { latitude: lat, longitude: lng },
-                //             { latitude: req.query.lat, longitude: req.query.lng }
-                //         );
-
-                //         console.log(`distance from current location: ${distance / 1000}; in radius ${inRadius}`);
-                //         if (inRadius) {
-                //             teamsInRadius.push(team);
-                //         }
-                //     }
-                // });
-                res.json(teams);
-
-            }, (err) => {
-                console.log('Unable to fetch Teams', err);
-            });
+        // validation of getting location and radius in query    
+        if (!req.query.radius && !req.query.lat && !req.query.lng) {
+            console.log('Unknown location and radius for search nearby teams');
+            return;
         }
 
         //Work version of getting teams inRadius from current location 
-        // client.db().collection('Teams').find({
+        // client.db().collection('teams').find({
         // }).toArray().then((teams) => {
         //     //console.log(JSON.stringify(teams, undefined, 2));
         //     let teamsInRadius=[];
@@ -171,7 +112,7 @@ router.get('/', (req, res) => {
 
 //POST Team route
 router.post('/', (req, res) => {
-    console.log(req.body);
+    // console.log(req.body);
     res.send('team');
 });
 
